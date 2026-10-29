@@ -19,15 +19,39 @@ import {
   Clock3,
 } from 'lucide-react'
 
+
 type Song = {
+  id?: string
   title: string
   artist: string
   image: string
   mood: string
   audio?: string
+  shareurl?: string
+  license?: string
 }
 
-const songs: Song[] = [
+type JamendoTrack = {
+  id: string
+  name: string
+  artist_name: string
+  image: string
+  audio: string
+  duration: string
+  shareurl: string
+  license_ccurl?: string
+}
+
+type JamendoResponse = {
+  headers: {
+    status: string
+    error_message?: string
+  }
+  results: JamendoTrack[]
+}
+
+
+const fallbackSongs: Song[] = [
   {
     title: 'The Night We Met',
     artist: 'Lord Huron',
@@ -84,9 +108,87 @@ function App() {
   const [showQueue, setShowQueue] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
+  const [songs, setSongs] = useState<Song[]>(fallbackSongs)
+  const [isLoadingSongs, setIsLoadingSongs] = useState(false)
+  const [songsError, setSongsError] = useState('')
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const song = songs[currentSong]
+
+  useEffect(() => {
+    async function fetchSongs() {
+      const clientId = import.meta.env.VITE_JAMENDO_CLIENT_ID
+
+      if (!clientId || clientId === 'your_client_id_here') {
+        setSongsError('Jamendo Client ID is missing. Check your .env file.')
+        return
+      }
+
+      setIsLoadingSongs(true)
+      setSongsError('')
+
+      try {
+        const params = new URLSearchParams({
+          client_id: clientId,
+          format: 'json',
+          limit: '20',
+          audioformat: 'mp32',
+          include: 'licenses',
+        })
+
+        const apiUrl =
+          `https://api.jamendo.com/v3.0/tracks/?${params.toString()}`
+
+        console.log('Jamendo request URL:', apiUrl)
+
+        const response = await fetch(apiUrl)
+
+        if (!response.ok) {
+          throw new Error(`HTTP error: ${response.status}`)
+        }
+
+        const data: JamendoResponse = await response.json()
+
+        if (data.headers.status !== 'success') {
+          throw new Error(
+            data.headers.error_message || 'Jamendo returned an error.'
+          )
+        }
+
+        const fetchedSongs: Song[] = data.results
+          .filter((track) => Boolean(track.audio))
+          .map((track) => ({
+            id: track.id,
+            title: track.name,
+            artist: track.artist_name,
+            image: track.image,
+            mood: 'Chill',
+            audio: track.audio,
+            shareurl: track.shareurl,
+            license: track.license_ccurl,
+          }))
+
+        if (fetchedSongs.length === 0) {
+          throw new Error('Jamendo returned no playable tracks for this search.')
+        }
+
+        setSongs(fetchedSongs)
+        setCurrentSong(0)
+        setIsPlaying(false)
+      } catch (error) {
+        console.error('Failed to fetch Jamendo tracks:', error)
+        setSongsError(
+          error instanceof Error
+            ? error.message
+            : 'Something went wrong while fetching music.'
+        )
+      } finally {
+        setIsLoadingSongs(false)
+      }
+    }
+
+    void fetchSongs()
+  }, [])
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -247,7 +349,7 @@ function App() {
                 .map((item) => (
                   <button
                     className="song-card"
-                    key={item.title}
+                    key={item.id ?? item.title}
                     onClick={() => {
                       setCurrentSong(songs.indexOf(item))
                       setIsPlaying(true)
@@ -360,10 +462,18 @@ function App() {
               </div>
 
               <div className="song-grid">
+                {isLoadingSongs && (
+                  <p className="music-status">Finding your music...</p>
+                )}
+
+                {songsError && (
+                  <p className="music-status">{songsError}</p>
+                )}
+                
                 {songs.map((item, index) => (
                   <button
                     className="song-card"
-                    key={item.title}
+                    key={item.id ?? item.title}
                     onClick={() => {
                       setCurrentSong(index)
                       setIsPlaying(true)
